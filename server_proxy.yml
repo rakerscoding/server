@@ -1,0 +1,85 @@
+---
+- hosts: all
+  tasks:
+    - name: Install NodeJs
+      become: yes
+      become_user: root
+      dnf:
+        name: nodejs
+        state: latest
+    
+    - name: Make ~/server directory
+      file:
+        path: /home/user/server
+        state: directory
+
+    - name: Make ~/server/public directory
+      file:
+        path: /home/user/server/public
+        state: directory
+    
+    #The package.json does not need to be unique on each machine, so using a copy is more straightforward than trying to manage "npm init" through Ansible
+    - name: Copy package.json
+      copy: 
+        src: /home/user/server/package.json
+        dest: /home/user/server/package.json
+    
+    - name : Install http-server
+      npm:
+        name: http-server
+        global: yes
+        state: present
+    
+    - name: Copy index.html
+      copy: 
+        src: /home/user/server/public/index.html
+        dest: /home/user/server/public/index.html
+    
+    - name: Install NGINX
+      become: yes
+      become_user: root
+      dnf:
+        name: nginx
+        state: latest
+    
+    - name: Start NGINX
+      become: yes
+      become_user: root
+      service:
+          name: nginx
+          state: started
+    
+    #NGINX only needs to forward requests, so a simplified default conf is sufficient
+    - name: Copy server.conf
+      copy:
+        src: /home/user/server/nginx.conf
+        dest: /etc/nginx/nginx.conf
+    
+    #CentOS needs this flag set to true to allow NGINX to connect to the NodeJS web server
+    - name: Allow network connecting for apps
+      become: yes
+      become_user: root
+      shell: setsebool -P httpd_can_network_connect true    
+
+    #Port 8888 is not available to NGINX by default, and must be opened
+    - name: Allow binding on port 8888
+      become: yes
+      become_user: root
+      shell: semanage port -a -t http_port_t  -p tcp 8888   
+    
+    #Launching the http-server in the background prevents Ansible from hanging on the task, and launching it with the async flag prevents Ansible from ending the process
+    - name: Launch http-server
+      become: yes
+      become_user: root
+      shell: npx http-server -p 8080 &
+      args:
+        chdir: /home/user/server/public
+      async: 10
+      poll: 0
+
+    - name: Restart NGINX
+      become: yes
+      become_user: root
+      service:
+        name: nginx
+        state: restarted
